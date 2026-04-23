@@ -10,6 +10,7 @@ import ScheduleDetailPage from './ScheduleDetailPage';
 import PlanPage from './PlanPage';
 import SessionPage from './SessionPage';
 import ScheduleChatPage from './ScheduleChatPage';
+import CalendarConnectCallbackPage from './CalendarConnectCallbackPage';
 
 function PrivateRoute({ children }) {
   const { user } = useAuth();
@@ -23,6 +24,7 @@ export default function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/auth/calendar/callback" element={<CalendarConnectCallbackPage />} />
             <Route
               path="/"
               element={

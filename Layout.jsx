@@ -10,7 +10,9 @@ import {
   Moon,
   Sun,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { auth } from './index';
+import { connectCalendarWithPopup } from './calendarConnect';
 
 // Only nav items that correspond to real backend features
 const navItems = [
@@ -41,6 +43,68 @@ export default function Layout() {
   const { user, logout } = useAuth();
   const { isDark, toggleTheme } = useTheme();
   const [profileOpen, setProfileOpen] = useState(false);
+  const [calendarStatusLoading, setCalendarStatusLoading] = useState(false);
+  const [calendarConnected, setCalendarConnected] = useState(false);
+  const [calendarEmail, setCalendarEmail] = useState('');
+  const [calendarBusy, setCalendarBusy] = useState(false);
+  const [calendarError, setCalendarError] = useState('');
+
+  useEffect(() => {
+    if (!profileOpen) return;
+
+    let active = true;
+    setCalendarStatusLoading(true);
+    setCalendarError('');
+
+    auth.calendarStatus()
+      .then((status) => {
+        if (!active) return;
+        setCalendarConnected(Boolean(status?.connected));
+        setCalendarEmail(String(status?.email || ''));
+      })
+      .catch((e) => {
+        if (!active) return;
+        setCalendarError(e.message || 'Unable to load calendar status');
+      })
+      .finally(() => {
+        if (!active) return;
+        setCalendarStatusLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [profileOpen]);
+
+  const connectCalendar = async () => {
+    setCalendarBusy(true);
+    setCalendarError('');
+    try {
+      const result = await connectCalendarWithPopup(auth);
+      setCalendarConnected(Boolean(result?.connected));
+      setCalendarEmail(String(result?.email || ''));
+      alert('Google Calendar connected successfully.');
+    } catch (e) {
+      setCalendarError(e.message || 'Failed to connect Google Calendar');
+    } finally {
+      setCalendarBusy(false);
+    }
+  };
+
+  const disconnectCalendar = async () => {
+    setCalendarBusy(true);
+    setCalendarError('');
+    try {
+      await auth.calendarDisconnect();
+      setCalendarConnected(false);
+      setCalendarEmail('');
+      alert('Google Calendar disconnected.');
+    } catch (e) {
+      setCalendarError(e.message || 'Failed to disconnect Google Calendar');
+    } finally {
+      setCalendarBusy(false);
+    }
+  };
 
   const initials = user?.name
     ?.split(' ')
@@ -128,9 +192,38 @@ export default function Layout() {
             </button>
 
             {profileOpen && (
-              <div className="absolute right-0 top-full mt-2 w-40 bg-white rounded-xl shadow-lg border border-gray-100 py-1 z-50 dark:bg-slate-800 dark:border-slate-700">
+              <div className="absolute right-0 top-full mt-2 w-72 bg-white rounded-xl shadow-lg border border-gray-100 py-1 z-50 dark:bg-slate-800 dark:border-slate-700">
                 <div className="px-4 py-2 border-b border-gray-100 dark:border-slate-700">
                   <p className="text-xs font-medium text-gray-700 dark:text-gray-200 truncate">{user?.email}</p>
+                </div>
+                <div className="px-4 py-3 border-b border-gray-100 dark:border-slate-700">
+                  <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">Google Calendar</p>
+                  {calendarStatusLoading ? (
+                    <p className="text-xs text-gray-400 mt-1">Checking status...</p>
+                  ) : calendarConnected ? (
+                    <p className="text-xs text-green-600 mt-1 truncate">Connected{calendarEmail ? `: ${calendarEmail}` : ''}</p>
+                  ) : (
+                    <p className="text-xs text-amber-600 mt-1">Not connected</p>
+                  )}
+                  {calendarError && (
+                    <p className="text-xs text-red-500 mt-1">{calendarError}</p>
+                  )}
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      onClick={connectCalendar}
+                      disabled={calendarBusy}
+                      className="flex-1 text-xs rounded-lg px-2.5 py-1.5 border border-gray-200 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-700 disabled:opacity-50 dark:text-gray-100 transition-colors"
+                    >
+                      {calendarBusy ? 'Please wait...' : 'Connect'}
+                    </button>
+                    <button
+                      onClick={disconnectCalendar}
+                      disabled={calendarBusy || !calendarConnected}
+                      className="flex-1 text-xs rounded-lg px-2.5 py-1.5 border border-red-200 text-red-500 hover:bg-red-50 disabled:opacity-50 transition-colors"
+                    >
+                      Disconnect
+                    </button>
+                  </div>
                 </div>
                 <button
                   onClick={() => { setProfileOpen(false); logout(); }}

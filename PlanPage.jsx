@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { plan as planApi, operations } from './index';
+import { plan as planApi, operations, auth } from './index';
+import { connectCalendarWithPopup } from './calendarConnect';
 import {
   BrainCircuit, CheckCircle2, RefreshCw, Calendar,
   Send, ChevronDown, ChevronUp, Zap, RotateCcw,
@@ -27,6 +28,11 @@ function isPlanSynced(plan) {
     const status = String(session?.calendar_status || '').trim().toLowerCase();
     return Boolean(eventId) || status === 'created';
   }));
+}
+
+function isCalendarNotConnectedError(message) {
+  const value = String(message || '').toLowerCase();
+  return value.includes('google calendar is not connected') || value.includes('not connected for this user');
 }
 
 function getVisibleSessionsForPlan(plan, materializedSessions) {
@@ -319,6 +325,25 @@ export default function PlanPage() {
       await refreshPlanAndSessions();
       alert('Plan synced to Google Calendar.');
     } catch (e) {
+      if (isCalendarNotConnectedError(e.message)) {
+        const shouldConnect = confirm('Google Calendar is not connected. Connect now and retry sync?');
+        if (!shouldConnect) {
+          alert('Calendar sync failed: ' + e.message);
+          return;
+        }
+
+        try {
+          await connectCalendarWithPopup(auth);
+          await planApi.syncCalendar(id, { plan_id: selectedPlan.id });
+          await refreshPlanAndSessions();
+          alert('Google Calendar connected and plan synced successfully.');
+          return;
+        } catch (connectError) {
+          alert('Calendar connect/sync failed: ' + connectError.message);
+          return;
+        }
+      }
+
       alert('Calendar sync failed: ' + e.message);
     } finally {
       setCalendarSyncing(false);

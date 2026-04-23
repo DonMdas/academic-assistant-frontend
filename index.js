@@ -129,6 +129,20 @@ export const auth = {
   google:  (id_token) => request('/auth/google',  { method: 'POST', body: JSON.stringify({ id_token }) }),
   refresh: _refreshToken,
   logout:  ()         => request('/auth/logout',   { method: 'POST' }),
+  calendarAuthorizationUrl: (redirectUri) => {
+    const qs = redirectUri ? `?redirect_uri=${encodeURIComponent(redirectUri)}` : '';
+    return request(`/auth/google/calendar/authorization-url${qs}`);
+  },
+  calendarConnect: (authorizationCode, redirectUri) =>
+    request('/auth/google/calendar/connect', {
+      method: 'POST',
+      body: JSON.stringify({
+        authorization_code: authorizationCode,
+        ...(redirectUri ? { redirect_uri: redirectUri } : {}),
+      }),
+    }),
+  calendarStatus: () => request('/auth/google/calendar/status'),
+  calendarDisconnect: () => request('/auth/google/calendar/disconnect', { method: 'DELETE' }),
 };
 
 // ─── SCHEDULES (/schedules) ─────────────────────────────────────
