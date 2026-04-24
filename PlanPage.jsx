@@ -43,6 +43,78 @@ function getVisibleSessionsForPlan(plan, materializedSessions) {
   return Array.isArray(plan.sessions) ? plan.sessions : [];
 }
 
+function normalizeQwenReview(plan) {
+  const source = plan?.review?.qwen_feedback
+    || plan?.constraints?.qwen_feedback
+    || plan?.constraints?.model_notes?.qwen
+    || {};
+
+  const strengths = Array.isArray(source?.strengths) ? source.strengths.filter(Boolean) : [];
+  const risks = Array.isArray(source?.risks) ? source.risks.filter(Boolean) : [];
+  const suggestedAdjustments = Array.isArray(source?.suggested_adjustments)
+    ? source.suggested_adjustments.filter(Boolean)
+    : [];
+
+  const severityRaw = Number(source?.severity);
+  const severity = Number.isFinite(severityRaw) ? Math.max(0, Math.min(3, Math.trunc(severityRaw))) : null;
+  const approvalReady = typeof source?.approval_ready === 'boolean' ? source.approval_ready : null;
+  const summary = typeof source?.summary === 'string' ? source.summary.trim() : '';
+
+  return {
+    summary,
+    strengths,
+    risks,
+    suggestedAdjustments,
+    severity,
+    approvalReady,
+    hasContent: Boolean(summary || strengths.length || risks.length || suggestedAdjustments.length || severity !== null),
+  };
+}
+
+function resolvePlannerPrompt(plan) {
+  const review = plan?.review || {};
+  const constraints = plan?.constraints || {};
+
+  const clarificationQuestion = String(
+    review?.clarification_question
+      || constraints?.clarification_question
+      || constraints?.model_notes?.clarification_question
+      || '',
+  ).trim();
+
+  const feedbackPrompt = String(
+    review?.feedback_prompt
+      || constraints?.feedback_prompt
+      || '',
+  ).trim();
+
+  const prompt = clarificationQuestion || feedbackPrompt;
+  const isClarification = Boolean(clarificationQuestion)
+    || Boolean(review?.clarification_requested)
+    || String(review?.feedback_source || '').trim().toLowerCase() === 'gemma_clarification';
+
+  return {
+    prompt,
+    isClarification,
+  };
+}
+
+function qwenSeverityLabel(severity) {
+  if (severity === 0) return 'Excellent';
+  if (severity === 1) return 'Minor issues';
+  if (severity === 2) return 'Major issues';
+  if (severity === 3) return 'Critical';
+  return 'Unknown';
+}
+
+function qwenSeverityClasses(severity) {
+  if (severity === 0) return 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300';
+  if (severity === 1) return 'bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300';
+  if (severity === 2) return 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300';
+  if (severity === 3) return 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300';
+  return 'bg-gray-100 text-gray-600 dark:bg-slate-700 dark:text-gray-300';
+}
+
 function LogTerminal({ logs, open, onToggle }) {
   const bottomRef = useRef();
   useEffect(() => {
@@ -164,6 +236,9 @@ export default function PlanPage() {
   const selectedPlan = allPlans.find((plan) => plan.id === selectedPlanId) || planData || null;
   const visibleSessions = getVisibleSessionsForPlan(selectedPlan, sessions);
   const selectedPlanSynced = isPlanSynced(selectedPlan);
+  const selectedPlanIsConfirmed = selectedPlan?.status === 'active';
+  const qwenReview = normalizeQwenReview(selectedPlan);
+  const plannerPrompt = resolvePlannerPrompt(selectedPlan);
 
   const closeActiveStream = useCallback(() => {
     if (esRef.current) {
@@ -173,7 +248,7 @@ export default function PlanPage() {
     activeOpIdRef.current = null;
   }, []);
 
-  const refreshPlanAndSessions = useCallback(async () => {
+  const refreshPlanAndSessions = useCallback(async ({ preferLatest = false } = {}) => {
     const [currentPlan, plans, sess] = await Promise.all([
       planApi.get(id).catch(() => null),
       planApi.listAll(id).catch(() => []),
@@ -186,6 +261,11 @@ export default function PlanPage() {
     setSessions(Array.isArray(sess) ? sess : []);
 
     setSelectedPlanId((prev) => {
+      if (preferLatest) {
+        if (currentPlan?.id) return currentPlan.id;
+        return normalizedPlans[0]?.id || null;
+      }
+
       if (prev && normalizedPlans.some((plan) => plan.id === prev)) return prev;
       if (currentPlan?.id && normalizedPlans.some((plan) => plan.id === currentPlan.id)) return currentPlan.id;
       return normalizedPlans[0]?.id || currentPlan?.id || null;
@@ -226,7 +306,7 @@ export default function PlanPage() {
         if (activeOpIdRef.current !== operationId) return;
         closeActiveStream();
         try {
-          const refreshed = await refreshPlanAndSessions();
+          const refreshed = await refreshPlanAndSessions({ preferLatest: true });
           const hasPlans = (refreshed.plans || []).length > 0 || Boolean(refreshed.currentPlan?.id);
           setPhase(hasPlans ? 'review' : 'idle');
           setFeedback('');
@@ -305,7 +385,7 @@ export default function PlanPage() {
   };
 
   const handleConfirm = async () => {
-    if (!selectedPlan?.id) return;
+    if (!selectedPlan?.id || selectedPlan?.status === 'active') return;
     setPhase('confirming');
     try {
       await planApi.confirm(id, { plan_id: selectedPlan.id });
@@ -623,10 +703,69 @@ export default function PlanPage() {
               </div>
             )}
 
-            {selectedPlan?.review?.feedback_prompt && (
+            {plannerPrompt.prompt && (
               <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 mb-4">
-                <h3 className="font-semibold text-amber-800 mb-2 text-sm">Planner Feedback Needed</h3>
-                <p className="text-sm text-amber-700">{selectedPlan.review.feedback_prompt}</p>
+                <h3 className="font-semibold text-amber-800 mb-2 text-sm">
+                  {plannerPrompt.isClarification ? 'Planner Clarification Needed' : 'Planner Feedback Needed'}
+                </h3>
+                <p className="text-sm text-amber-700">{plannerPrompt.prompt}</p>
+              </div>
+            )}
+
+            {qwenReview.hasContent && (
+              <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm dark:shadow-none dark:border dark:border-slate-700 mb-4">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                  <h3 className="font-semibold text-gray-800 dark:text-gray-100 text-sm">Qwen Plan Review</h3>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {qwenReview.severity !== null && (
+                      <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full ${qwenSeverityClasses(qwenReview.severity)}`}>
+                        Severity {qwenReview.severity}: {qwenSeverityLabel(qwenReview.severity)}
+                      </span>
+                    )}
+                    {qwenReview.approvalReady !== null && (
+                      <span
+                        className={`text-[11px] font-semibold px-2.5 py-1 rounded-full ${
+                          qwenReview.approvalReady
+                            ? 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300'
+                            : 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300'
+                        }`}
+                      >
+                        {qwenReview.approvalReady ? 'Approval Ready' : 'Needs Revision'}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {qwenReview.summary && (
+                  <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed mb-3">{qwenReview.summary}</p>
+                )}
+
+                {qwenReview.strengths.length > 0 && (
+                  <div className="mb-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-green-700 dark:text-green-300 mb-1.5">Strengths</p>
+                    <ul className="list-disc ml-5 text-sm text-gray-700 dark:text-gray-300 space-y-1">
+                      {qwenReview.strengths.map((item, idx) => <li key={`strength-${idx}`}>{item}</li>)}
+                    </ul>
+                  </div>
+                )}
+
+                {qwenReview.risks.length > 0 && (
+                  <div className="mb-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300 mb-1.5">Risks</p>
+                    <ul className="list-disc ml-5 text-sm text-gray-700 dark:text-gray-300 space-y-1">
+                      {qwenReview.risks.map((item, idx) => <li key={`risk-${idx}`}>{item}</li>)}
+                    </ul>
+                  </div>
+                )}
+
+                {qwenReview.suggestedAdjustments.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700 dark:text-indigo-300 mb-1.5">Suggested Adjustments</p>
+                    <ul className="list-disc ml-5 text-sm text-gray-700 dark:text-gray-300 space-y-1">
+                      {qwenReview.suggestedAdjustments.map((item, idx) => <li key={`adjust-${idx}`}>{item}</li>)}
+                    </ul>
+                  </div>
+                )}
               </div>
             )}
 
@@ -668,13 +807,19 @@ export default function PlanPage() {
               >
                 <RotateCcw size={14} /> Generate New Plan
               </button>
-              <button
-                onClick={handleConfirm}
-                disabled={!selectedPlan?.id}
-                className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-xl py-3 font-semibold flex items-center justify-center gap-2 transition-colors"
-              >
-                <CheckCircle2 size={16} /> Confirm Selected Plan
-              </button>
+              {selectedPlanIsConfirmed ? (
+                <div className="flex-1 bg-green-50 border border-green-200 text-green-700 rounded-xl py-3 font-semibold flex items-center justify-center gap-2">
+                  <CheckCircle2 size={16} /> Already Confirmed Plan
+                </div>
+              ) : (
+                <button
+                  onClick={handleConfirm}
+                  disabled={!selectedPlan?.id}
+                  className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-xl py-3 font-semibold flex items-center justify-center gap-2 transition-colors"
+                >
+                  <CheckCircle2 size={16} /> Confirm Selected Plan
+                </button>
+              )}
             </div>
           </div>
         </div>
