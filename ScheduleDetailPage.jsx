@@ -46,15 +46,33 @@ function IngestLogTerminal({ logs, open, onToggle }) {
             <span className="text-gray-600">Waiting for logs...</span>
           )}
           {logs.map((entry, idx) => {
-            const msg = typeof entry === 'object' ? (entry.message || JSON.stringify(entry)) : String(entry);
-            const level = typeof entry === 'object' ? entry.level : 'info';
+            const level = typeof entry === 'object' ? String(entry.level || 'info').toLowerCase() : 'info';
             const color = {
               error: 'text-red-400',
               warn: 'text-yellow-400',
               info: 'text-green-400',
               success: 'text-emerald-400',
             }[level] || 'text-green-400';
-            return <div key={idx} className={color}>{msg}</div>;
+
+            const message = typeof entry === 'object' ? (entry.message || JSON.stringify(entry)) : String(entry);
+            const metadata = typeof entry === 'object' && entry?.metadata && typeof entry.metadata === 'object'
+              ? entry.metadata
+              : {};
+            const lines = [String(message || '').trim() || '(no message)'];
+
+            const reason = typeof metadata.reason === 'string' ? metadata.reason.trim() : '';
+            if (reason) lines.push(`  reason: ${reason}`);
+
+            const reasons = Array.isArray(metadata.reasons) ? metadata.reasons.filter(Boolean) : [];
+            if (reasons.length) lines.push(`  reasons: ${reasons.join('; ')}`);
+
+            return (
+              <div key={idx} className={color}>
+                {lines.map((line, lineIdx) => (
+                  <div key={`${idx}-${lineIdx}`}>{line}</div>
+                ))}
+              </div>
+            );
           })}
           <div ref={bottomRef} />
         </div>

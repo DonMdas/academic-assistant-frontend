@@ -43,22 +43,18 @@ function getVisibleSessionsForPlan(plan, materializedSessions) {
   return Array.isArray(plan.sessions) ? plan.sessions : [];
 }
 
-function normalizeQwenReview(plan) {
-  const source = plan?.review?.qwen_feedback
-    || plan?.constraints?.qwen_feedback
-    || plan?.constraints?.model_notes?.qwen
-    || {};
-
-  const strengths = Array.isArray(source?.strengths) ? source.strengths.filter(Boolean) : [];
-  const risks = Array.isArray(source?.risks) ? source.risks.filter(Boolean) : [];
-  const suggestedAdjustments = Array.isArray(source?.suggested_adjustments)
-    ? source.suggested_adjustments.filter(Boolean)
+function normalizeQwenFeedback(source) {
+  const payload = source || {};
+  const strengths = Array.isArray(payload?.strengths) ? payload.strengths.filter(Boolean) : [];
+  const risks = Array.isArray(payload?.risks) ? payload.risks.filter(Boolean) : [];
+  const suggestedAdjustments = Array.isArray(payload?.suggested_adjustments)
+    ? payload.suggested_adjustments.filter(Boolean)
     : [];
 
-  const severityRaw = Number(source?.severity);
+  const severityRaw = Number(payload?.severity);
   const severity = Number.isFinite(severityRaw) ? Math.max(0, Math.min(3, Math.trunc(severityRaw))) : null;
-  const approvalReady = typeof source?.approval_ready === 'boolean' ? source.approval_ready : null;
-  const summary = typeof source?.summary === 'string' ? source.summary.trim() : '';
+  const approvalReady = typeof payload?.approval_ready === 'boolean' ? payload.approval_ready : null;
+  const summary = typeof payload?.summary === 'string' ? payload.summary.trim() : '';
 
   return {
     summary,
@@ -69,6 +65,23 @@ function normalizeQwenReview(plan) {
     approvalReady,
     hasContent: Boolean(summary || strengths.length || risks.length || suggestedAdjustments.length || severity !== null),
   };
+}
+
+function normalizeQwenReview(plan) {
+  const source = plan?.review?.qwen_feedback
+    || plan?.constraints?.qwen_feedback
+    || plan?.constraints?.model_notes?.qwen
+    || {};
+
+  return normalizeQwenFeedback(source);
+}
+
+function getQwenReviewHistory(plan) {
+  const history = plan?.constraints?.model_notes?.qwen_feedback_history;
+  if (!Array.isArray(history)) return [];
+  return history
+    .map((entry) => normalizeQwenFeedback(entry))
+    .filter((entry) => entry.hasContent);
 }
 
 function resolvePlannerPrompt(plan) {
@@ -115,6 +128,25 @@ function qwenSeverityClasses(severity) {
   return 'bg-gray-100 text-gray-600 dark:bg-slate-700 dark:text-gray-300';
 }
 
+function normalizeLogEntry(entry) {
+  if (!entry || typeof entry !== 'object') {
+    return { level: 'info', lines: [String(entry ?? '')] };
+  }
+
+  const message = entry.message || JSON.stringify(entry);
+  const level = String(entry.level || 'info').toLowerCase();
+  const metadata = entry.metadata && typeof entry.metadata === 'object' ? entry.metadata : {};
+
+  const lines = [String(message || '').trim() || '(no message)'];
+  const reason = typeof metadata.reason === 'string' ? metadata.reason.trim() : '';
+  if (reason) lines.push(`  reason: ${reason}`);
+
+  const reasons = Array.isArray(metadata.reasons) ? metadata.reasons.filter(Boolean) : [];
+  if (reasons.length) lines.push(`  reasons: ${reasons.join('; ')}`);
+
+  return { level, lines };
+}
+
 function LogTerminal({ logs, open, onToggle }) {
   const bottomRef = useRef();
   useEffect(() => {
@@ -136,10 +168,15 @@ function LogTerminal({ logs, open, onToggle }) {
             <span className="text-gray-600">Waiting for logs...</span>
           )}
           {logs.map((l, i) => {
-            const msg = typeof l === 'object' ? (l.message || JSON.stringify(l)) : l;
-            const level = typeof l === 'object' ? l.level : 'info';
-            const color = { error: 'text-red-400', warn: 'text-yellow-400', info: 'text-green-400', success: 'text-emerald-400' }[level] || 'text-green-400';
-            return <div key={i} className={color}>{msg}</div>;
+            const normalized = normalizeLogEntry(l);
+            const color = { error: 'text-red-400', warn: 'text-yellow-400', info: 'text-green-400', success: 'text-emerald-400' }[normalized.level] || 'text-green-400';
+            return (
+              <div key={i} className={color}>
+                {normalized.lines.map((line, idx) => (
+                  <div key={`${i}-${idx}`}>{line}</div>
+                ))}
+              </div>
+            );
           })}
           <div ref={bottomRef} />
         </div>
@@ -238,6 +275,7 @@ export default function PlanPage() {
   const selectedPlanSynced = isPlanSynced(selectedPlan);
   const selectedPlanIsConfirmed = selectedPlan?.status === 'active';
   const qwenReview = normalizeQwenReview(selectedPlan);
+  const qwenReviewHistory = getQwenReviewHistory(selectedPlan);
   const plannerPrompt = resolvePlannerPrompt(selectedPlan);
 
   const closeActiveStream = useCallback(() => {
@@ -768,6 +806,52 @@ export default function PlanPage() {
                     </ul>
                   </div>
                 )}
+              </div>
+            )}
+
+            {qwenReviewHistory.length > 1 && (
+              <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm dark:shadow-none dark:border dark:border-slate-700 mb-4">
+                <h3 className="font-semibold text-gray-800 dark:text-gray-100 text-sm mb-3">Qwen Review History</h3>
+                <div className="space-y-3">
+                  {qwenReviewHistory.map((entry, idx) => (
+                    <div key={`qwen-history-${idx}`} className="border border-gray-100 dark:border-slate-700 rounded-xl p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                        <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Pass {idx + 1}</span>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {entry.severity !== null && (
+                            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${qwenSeverityClasses(entry.severity)}`}>
+                              Severity {entry.severity}
+                            </span>
+                          )}
+                          {entry.approvalReady !== null && (
+                            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${entry.approvalReady ? 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300'}`}>
+                              {entry.approvalReady ? 'Approval Ready' : 'Needs Revision'}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {entry.summary && (
+                        <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed mb-2">{entry.summary}</p>
+                      )}
+                      {entry.risks.length > 0 && (
+                        <div className="mb-2">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300 mb-1">Risks</p>
+                          <ul className="list-disc ml-4 text-xs text-gray-600 dark:text-gray-300 space-y-0.5">
+                            {entry.risks.map((item, riskIdx) => <li key={`risk-${idx}-${riskIdx}`}>{item}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      {entry.suggestedAdjustments.length > 0 && (
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-700 dark:text-indigo-300 mb-1">Suggested Adjustments</p>
+                          <ul className="list-disc ml-4 text-xs text-gray-600 dark:text-gray-300 space-y-0.5">
+                            {entry.suggestedAdjustments.map((item, adjIdx) => <li key={`adj-${idx}-${adjIdx}`}>{item}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
