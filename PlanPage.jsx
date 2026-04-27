@@ -351,11 +351,13 @@ export default function PlanPage() {
     closeActiveStream();
 
     try {
-      const body = {
-        constraints: constraints.trim() ? { note: constraints.trim() } : {},
-        user_feedback: '',
-        feedback_history: [],
-      };
+      // AFTER
+    // BEFORE
+    const body = {
+      constraints: {},
+      user_feedback: constraints.trim(),
+      feedback_history: constraints.trim() ? [constraints.trim()] : [],
+    };
       const { operation_id: operationId } = await planApi.generateAsync(id, body);
       streamOperation(operationId, 'Plan generation completed');
     } catch (e) {
