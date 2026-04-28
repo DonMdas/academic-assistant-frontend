@@ -50,6 +50,7 @@ export default function SessionPage() {
   const [sidebar, setSidebar] = useState(null);
   const [briefing, setBriefing] = useState('');
   const [briefingDone, setBriefingDone] = useState(false);
+  const [briefingOpen, setBriefingOpen] = useState(true);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
@@ -198,12 +199,24 @@ export default function SessionPage() {
         {/* Briefing card — shown while streaming and after if not empty */}
         {briefing && (
           <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-4 mb-3 flex-shrink-0">
-            <div className="flex items-center gap-2 mb-2">
+            <div className="flex items-center gap-2">
               <Brain size={15} className="text-indigo-600" />
               <span className="text-xs font-semibold text-indigo-700">Session Briefing</span>
-              {!briefingDone && <Loader2 size={12} className="animate-spin text-indigo-400 ml-auto" />}
+              {!briefingDone && <Loader2 size={12} className="animate-spin text-indigo-400" />}
+              <button
+                type="button"
+                onClick={() => setBriefingOpen((open) => !open)}
+                className="ml-auto text-xs text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
+              >
+                <ChevronRight size={12} className={`transition-transform ${briefingOpen ? 'rotate-90' : ''}`} />
+                {briefingOpen ? 'Collapse' : 'Expand'}
+              </button>
             </div>
-            <p className="text-sm text-indigo-800 leading-relaxed whitespace-pre-wrap">{briefing}</p>
+            {briefingOpen && (
+              <p className="mt-2 text-sm text-indigo-800 leading-relaxed whitespace-pre-wrap max-h-64 overflow-y-auto">
+                {briefing}
+              </p>
+            )}
           </div>
         )}
 

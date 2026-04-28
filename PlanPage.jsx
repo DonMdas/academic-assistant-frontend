@@ -260,6 +260,8 @@ export default function PlanPage() {
   const [logsOpen, setLogsOpen] = useState(false);
   const [feedback, setFeedback] = useState('');
   const [constraints, setConstraints] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [calendarSyncing, setCalendarSyncing] = useState(false);
   const [calendarUnsyncing, setCalendarUnsyncing] = useState(false);
@@ -382,6 +384,11 @@ export default function PlanPage() {
   }, [closeActiveStream, refreshPlanAndSessions]);
 
   const generate = async () => {
+    if (startDate && endDate && endDate < startDate) {
+      setErrorMsg('End date must be on or after the start date.');
+      setPhase('error');
+      return;
+    }
     setPhase('generating');
     setLogs([]);
     setErrorMsg('');
@@ -392,7 +399,10 @@ export default function PlanPage() {
       // AFTER
     // BEFORE
     const body = {
-      constraints: {},
+      constraints: {
+        ...(startDate ? { start_date: startDate } : {}),
+        ...(endDate ? { end_date: endDate } : {}),
+      },
       user_feedback: constraints.trim(),
       feedback_history: constraints.trim() ? [constraints.trim()] : [],
     };
@@ -582,6 +592,27 @@ export default function PlanPage() {
           <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
             Our AI analyses your uploaded and indexed documents and creates a personalised plan with sessions.
           </p>
+          <div className="grid grid-cols-1 gap-3 mb-4 text-left">
+            <div>
+              <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 block mb-1">Start date</label>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="w-full border border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-900 text-gray-900 dark:text-gray-100 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-200"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 block mb-1">End date</label>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                min={startDate || undefined}
+                className="w-full border border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-900 text-gray-900 dark:text-gray-100 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-200"
+              />
+            </div>
+          </div>
           <textarea
             placeholder="Any constraints? e.g. 'Focus only on ML chapters' or 'Max 2 hours per day'"
             value={constraints}

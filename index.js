@@ -264,7 +264,7 @@ export const sessions = {
   briefingStream: (sessionId, { onDelta, onDone, onError } = {}) =>
     openEventSource(`/sessions/${sessionId}/briefing/stream`, {
       onMessage: (data) => {
-        if (data.delta) onDelta?.(data.delta);
+        if (data.delta || data.text) onDelta?.(data.delta ?? data.text ?? '');
         else if (typeof data === 'string') onDelta?.(data);
       },
       onDone,
